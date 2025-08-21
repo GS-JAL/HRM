@@ -101,11 +101,14 @@ class DominoGame:
         return sum(tile) + random.random() * 0.1  # Small random component for variety
 
 
-def generate_domino_game_data() -> List[dict]:
-    """Generate domino game scenarios with optimal moves"""
-    scenarios = []
+def generate_domino_game_data(count: int) -> List[dict]:
+    """Generate exactly `count` domino game scenarios with optimal moves."""
+    scenarios: List[dict] = []
+    attempts = 0
+    max_attempts = count * 20  # safety
     
-    for _ in range(1000):  # Generate 1000 different game scenarios
+    while len(scenarios) < count and attempts < max_attempts:
+        attempts += 1
         game = DominoGame()
         game.reset_game()
         
@@ -114,8 +117,7 @@ def generate_domino_game_data() -> List[dict]:
             playable = game.get_playable_tiles()
             if not playable:
                 break
-                
-            # Play a random tile
+            
             tile, positions = random.choice(playable)
             position = random.choice(positions)
             game.play_tile(tile, position)
@@ -127,52 +129,61 @@ def generate_domino_game_data() -> List[dict]:
         
         # Now get the current state and optimal move
         playable = game.get_playable_tiles()
-        if playable:
-            # Find "optimal" move using simple heuristic
-            best_tile = None
-            best_position = None
-            best_score = -1
-            
-            for tile, positions in playable:
-                score = game.simple_scoring_heuristic(tile)
-                if score > best_score:
-                    best_score = score
-                    best_tile = tile
-                    best_position = positions[0]  # Take first valid position
-            
-            scenarios.append({
-                'table_tiles': game.table_tiles.copy(),
-                'player_tiles': game.player_tiles.copy(),
-                'left_end': game.left_end,
-                'right_end': game.right_end,
-                'optimal_tile': best_tile,
-                'optimal_position': best_position
-            })
+        if not playable:
+            continue
+        
+        # Find "optimal" move using simple heuristic
+        best_tile = None
+        best_position = None
+        best_score = -1.0
+        
+        for tile, positions in playable:
+            score = game.simple_scoring_heuristic(tile)
+            if score > best_score:
+                best_score = score
+                best_tile = tile
+                best_position = positions[0]  # Take first valid position
+        
+        scenarios.append({
+            'table_tiles': game.table_tiles.copy(),
+            'player_tiles': game.player_tiles.copy(),
+            'left_end': game.left_end,
+            'right_end': game.right_end,
+            'optimal_tile': best_tile,
+            'optimal_position': best_position
+        })
     
     return scenarios
 
 
 def encode_game_state(scenario: dict) -> Tuple[np.ndarray, np.ndarray]:
-    """Encode game state into input/output arrays"""
+    """Encode game state into input/output arrays.
+
+    Inputs: length-72 sequence
+      - [0..55]: table representation (28 tiles max, each tile = 2 values)
+      - [56..69]: player tiles (7 tiles max, each tile = 2 values)
+      - [70..71]: left and right ends
+
+    Labels: length-72 sequence (to match HRM seq_len requirements)
+      - [0]: optimal tile value A (1..7), 0 if none
+      - [1]: optimal tile value B (1..7), 0 if none
+      - [2]: optimal position code (1=left, 2=right, 3=first), 0 if none
+      - [3..71]: 0 (ignored by loss via ignore_label_id)
+    """
     
-    # Create input encoding:
-    # First 56 positions: table representation (each tile = 2 values)
-    # Next 14 positions: player tiles (each tile = 2 values)  
-    # Next 2 positions: left and right ends
-    # Total: 72 positions
-    
+    # Input encoding
     input_seq = np.zeros(72, dtype=np.int32)
     
     # Encode table tiles (max 28 tiles on table, each takes 2 positions)
     table_pos = 0
-    for tile in scenario['table_tiles'][:28]:  # Limit to 28 tiles max
+    for tile in scenario['table_tiles'][:28]:
         input_seq[table_pos] = tile[0] + 1      # +1 to avoid 0 (reserved for padding)
         input_seq[table_pos + 1] = tile[1] + 1
         table_pos += 2
     
     # Encode player tiles (max 7 tiles, each takes 2 positions)
     player_pos = 56
-    for tile in scenario['player_tiles'][:7]:   # Limit to 7 tiles max
+    for tile in scenario['player_tiles'][:7]:
         input_seq[player_pos] = tile[0] + 1
         input_seq[player_pos + 1] = tile[1] + 1
         player_pos += 2
@@ -181,15 +192,11 @@ def encode_game_state(scenario: dict) -> Tuple[np.ndarray, np.ndarray]:
     input_seq[70] = (scenario['left_end'] + 1) if scenario['left_end'] is not None else 0
     input_seq[71] = (scenario['right_end'] + 1) if scenario['right_end'] is not None else 0
     
-    # Create output encoding:
-    # Position 0-1: optimal tile values
-    # Position 2: optimal position (1=left, 2=right, 3=first)
-    output_seq = np.zeros(3, dtype=np.int32)
-    
+    # Output encoding aligned to seq_len=72
+    output_seq = np.zeros(72, dtype=np.int32)
     if scenario['optimal_tile']:
         output_seq[0] = scenario['optimal_tile'][0] + 1
         output_seq[1] = scenario['optimal_tile'][1] + 1
-        
         position_map = {'left': 1, 'right': 2, 'first': 3}
         output_seq[2] = position_map.get(scenario['optimal_position'], 0)
     
@@ -201,7 +208,7 @@ def convert_subset(set_name: str, config: DataProcessConfig):
     
     # Generate game scenarios
     print(f"Generating {config.num_games} domino game scenarios...")
-    scenarios = generate_domino_game_data()
+    scenarios = generate_domino_game_data(config.num_games)
     
     # If subsample_size is specified for training set
     if set_name == "train" and config.subsample_size is not None:
@@ -226,9 +233,14 @@ def convert_subset(set_name: str, config: DataProcessConfig):
             # Add some augmentation by rotating tile values (simple augmentation)
             if aug_idx > 0:
                 # Simple augmentation: add random offset to all tile values (mod 7)
+                # Apply to inputs everywhere (nonzero entries)
                 offset = random.randint(1, 6)
                 inp = np.where(inp > 0, ((inp - 1 + offset) % 7) + 1, inp)
-                out = np.where(out > 0, ((out - 1 + offset) % 7) + 1, out)
+                # Apply ONLY to the first two output slots (tile values). Keep position code intact.
+                if out[0] > 0:
+                    out[0] = ((out[0] - 1 + offset) % 7) + 1
+                if out[1] > 0:
+                    out[1] = ((out[1] - 1 + offset) % 7) + 1
             
             # Add to results
             results["inputs"].append(inp)
@@ -254,11 +266,11 @@ def convert_subset(set_name: str, config: DataProcessConfig):
     
     # Metadata
     metadata = PuzzleDatasetMetadata(
-        seq_len=max(72, 3),  # Input is 72, output is 3
-        vocab_size=8,  # 0 (pad) + 1-7 (domino values 0-6 shifted by 1)
+        seq_len=72,  # Match input and label sequence lengths
+        vocab_size=8,  # 0 (pad) + 1..7 for domino values and position codes within 1..3
         
         pad_id=0,
-        ignore_label_id=None,
+        ignore_label_id=0,  # Ignore zeros in labels beyond the first 3 positions
         
         blank_identifier_id=0,
         num_puzzle_identifiers=1,
