@@ -1,0 +1,35 @@
+# Grid-ops-lite training config
+
+defaults:
+  - arch: hrm_v1
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# Data path
+data_path: data/grid-ops-lite
+
+# Hyperparams - Training
+global_batch_size: 384
+
+epochs: 20000
+eval_interval: 2000
+checkpoint_every_eval: true
+
+lr: 1e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 2000
+
+# Optimizer params
+beta1: 0.9
+beta2: 0.95
+weight_decay: 1.0
+puzzle_emb_weight_decay: 1.0
+
+# Puzzle embeddings
+puzzle_emb_lr: 1e-4
+
+# Optional per-arch overrides
+arch:
+  halt_max_steps: 16
