@@ -118,8 +118,15 @@ def place_S_T(grid: np.ndarray, need_T: bool, rng: np.random.Generator) -> Tuple
         # Ensure T is different from S
         candidates = np.argwhere(grid == TOK_DOT)
         if candidates.size == 0:
-            # Fallback: convert one wall to dot and place T
-            wy, wx = rng.integers(0, H), rng.integers(0, W)
+            # Fallback: convert a wall cell (not S) to DOT and place T there
+            wall_cells = np.argwhere(grid == TOK_WALL)
+            if wall_cells.size == 0:
+                # Extremely degenerate case; choose any non-(S) coordinate
+                all_cells = np.argwhere(np.ones_like(grid, dtype=bool))
+                all_cells = all_cells[(all_cells[:, 0] != sy) | (all_cells[:, 1] != sx)]
+                wy, wx = map(int, all_cells[rng.integers(0, all_cells.shape[0])])
+            else:
+                wy, wx = map(int, wall_cells[rng.integers(0, wall_cells.shape[0])])
             grid[wy, wx] = TOK_DOT
             candidates = np.array([[wy, wx]], dtype=np.int64)
         t_idx = rng.integers(0, candidates.shape[0])

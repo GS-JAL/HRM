@@ -101,6 +101,6 @@ Métricas:
 
 ## Troubleshooting
 
-- ValueError al apilar arrays: asegúrate de que el builder corre tras los cambios (el script ya padecea a `seq_len` por split).
+- ValueError al apilar arrays: asegúrate de que el builder corre tras los cambios (el script ya paddea a `seq_len` por split).
 - Sin camino S→T: el builder reintenta y, si falla, genera un corredor trivial para garantizar etiquetas válidas.
 - Secuencia demasiado larga por rangos amplios: reduce `hard_H_max×hard_W_max` o separa splits con `output_dir` distintos.
